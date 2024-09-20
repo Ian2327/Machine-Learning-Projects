@@ -52,8 +52,42 @@ def backtest(data, model, predictors, start=2500, step=250):
     return pd.concat(all_predictions)
 
 predictions = backtest(sp500, model, predictors)
-predictions["Predictions"].value_counts()
+predictions["Predictions"].value_counts() #If printed shows number of 0 and 1 in total
 
 score = precision_score(predictions["Target"], predictions["Predictions"])
-print(score)
+print("Precision (before): {}".format(score))
+
+#percentage of days where the market increases
+increase_percentage = predictions["Target"].value_counts() / predictions.shape[0]
+print("Actual percent of days increase/decrease:\n{}".format(increase_percentage))
+
+horizons = [2,5,60,250,1000] #2 days, 1 week, 3 months, 1 year, 4 years
+new_predictors = []
+
+for horizon in horizons:
+    rolling_averages = sp500.rolling(horizon).mean()
+    ratio_column = f"Close_Ratio_{horizon}"
+    sp500[ratio_column] = sp500["Close"] / rolling_averages["Close"] #ratio of today's close vs past previous days
+    trend_column = f"Trend_{horizon}"
+    sp500[trend_column] = sp500.shift(1).rolling(horizon).sum()["Target"]
+    new_predictors += [ratio_column, trend_column]
+
+sp500 = sp500.dropna() #Drops all rows with NaN (begins in 1993)
+
+model = RandomForestClassifier(n_estimators=200, min_samples_split=50, random_state=1)
+def predict(train, test, predictors, model):
+    model.fit(train[predictors], train["Target"])
+    preds = model.predict_proba(test[predictors])[:,1] #Predicts and returns probability (0, 1) rather than 0 or 1
+    preds[preds >= .6] = 1 #Only set to 1 if probability is 60% or greater
+    preds[preds < .6] = 0
+    preds = pd.Series(preds, index=test.index, name="Predictions")
+    combined = pd.concat([test["Target"], preds], axis=1)
+    return combined
+
+predictions = backtest(sp500, model, new_predictors)
+
+score = precision_score(predictions["Target"], predictions["Predictions"])
+print("Predictions (with improved model): {}".format(score))
+
+
 plt.show()
