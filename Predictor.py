@@ -63,7 +63,6 @@ print("Actual percent of days increase/decrease:\n{}".format(increase_percentage
 
 horizons = [2,5,60,250,1000] #2 days, 1 week, 3 months, 1 year, 4 years
 new_predictors = []
-
 for horizon in horizons:
     rolling_averages = sp500.rolling(horizon).mean()
     ratio_column = f"Close_Ratio_{horizon}"
@@ -71,9 +70,7 @@ for horizon in horizons:
     trend_column = f"Trend_{horizon}"
     sp500[trend_column] = sp500.shift(1).rolling(horizon).sum()["Target"]
     new_predictors += [ratio_column, trend_column]
-
 sp500 = sp500.dropna() #Drops all rows with NaN (begins in 1993)
-
 model = RandomForestClassifier(n_estimators=200, min_samples_split=50, random_state=1)
 def predict(train, test, predictors, model):
     model.fit(train[predictors], train["Target"])
@@ -83,11 +80,7 @@ def predict(train, test, predictors, model):
     preds = pd.Series(preds, index=test.index, name="Predictions")
     combined = pd.concat([test["Target"], preds], axis=1)
     return combined
-
 predictions = backtest(sp500, model, new_predictors)
-
 score = precision_score(predictions["Target"], predictions["Predictions"])
 print("Predictions (with improved model): {}".format(score))
-
-
 plt.show()

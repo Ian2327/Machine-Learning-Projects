@@ -22,20 +22,20 @@ for lag in range(1, 6):  # Create lag features for the past 5 days
     sp500[f"Volume_Lag_{lag}"] = sp500["Volume"].shift(lag)
 
 
-#Beginning of old predictor
+# Beginning of old predictor
 model = RandomForestClassifier(n_estimators=100, min_samples_split=100, random_state=1)
 
 train = sp500.iloc[:-100]
 test = sp500.iloc[-100:]
 
-predictors = ["Close", "Volume", "Open", "High", "Low"] #Don't include data that is from the future (i.e. Target, Tomorrow)
+predictors = ["Close", "Volume", "Open", "High", "Low"] # Don't include data that is from the future (i.e. Target, Tomorrow)
 model.fit(train[predictors], train["Target"])
 
 preds = model.predict(test[predictors])
 
-preds = pd.Series(preds, index=test.index) #Convert numpy array to pandas series
+preds = pd.Series(preds, index=test.index) # Convert numpy array to pandas series
 
-score = precision_score(test["Target"], preds) #Compares past actual and predicted data
+score = precision_score(test["Target"], preds) # Compares past actual and predicted data
 
 combined = pd.concat([test["Target"], preds], axis=1)
 #combined.plot()
@@ -47,7 +47,7 @@ def predict(train, test, predictors, model):
     combined = pd.concat([test["Target"], preds], axis=1)
     return combined
 
-#Predictions beginning with the first 10 years (2500 days), then add 1 year
+# Predictions beginning with the first 10 years (2500 days), then add 1 year
 def backtest(data, model, predictors, start=2500, step=250):
     all_predictions = []
     for i in range(start, data.shape[0], step):
@@ -58,17 +58,17 @@ def backtest(data, model, predictors, start=2500, step=250):
     return pd.concat(all_predictions)
 
 predictions = backtest(sp500, model, predictors)
-predictions["Predictions"].value_counts() #If printed shows number of 0 and 1 in total
+predictions["Predictions"].value_counts() # If printed shows number of 0 and 1 in total
 
 score = precision_score(predictions["Target"], predictions["Predictions"])
 print("Precision (before): {}".format(score))
 
-#percentage of days where the market increases
+# Percentage of days where the market increases
 increase_percentage = predictions["Target"].value_counts() / predictions.shape[0]
 print("Actual percent of days increase/decrease:\n{}".format(increase_percentage))
 
 
-#Beginning of new predictor
+# Beginning of new predictor
 horizons = [2,5,60,250,1000] #2 days, 1 week, 3 months, 1 year, 4 years
 new_predictors = []
 
@@ -98,12 +98,12 @@ new_predictors.append("RSI")
 sp500["VWAP"] = (sp500["Close"] * sp500["Volume"]).cumsum() / sp500["Volume"].cumsum()
 new_predictors.append("VWAP")
 
-sp500 = sp500.dropna() #Drops all rows with NaN (begins in 1993)
+sp500 = sp500.dropna() # Drops all rows with NaN (begins in 1993)
 
-# Step 3: Outlier Detection (Clip extreme outliers)
+# Outlier Detection (Clip extreme outliers)
 q_low = sp500["Close"].quantile(0.01)
 q_high = sp500["Close"].quantile(0.99)
-sp500["Close"] = sp500["Close"].clip(lower=q_low, upper=q_high)
+sp500.loc[:, "Close"] = sp500["Close"].copy().clip(lower=q_low, upper=q_high)
 
 param_grid = {
     'n_estimators': [100, 200, 300],
@@ -132,7 +132,7 @@ model = ensemble_model  # Use this model for prediction and backtesting
 #model = RandomForestClassifier(n_estimators=200, min_samples_split=50, random_state=1)
 def predict(train, test, predictors, model):
     model.fit(train[predictors], train["Target"])
-    preds = model.predict_proba(test[predictors])[:,1] #Predicts and returns probability (0, 1) rather than 0 or 1
+    preds = model.predict_proba(test[predictors])[:,1] # Predicts and returns probability (0, 1) rather than 0 or 1
     precision, recall, thresholds = precision_recall_curve(test["Target"], preds)
     f1_scores = 2 * (precision * recall) / (precision + recall)
     best_threshold = thresholds[np.argmax(f1_scores)]
@@ -143,7 +143,7 @@ def predict(train, test, predictors, model):
     combined = pd.concat([test["Target"], preds], axis=1)
     return combined
 
-# Step 6: Cross-Validation with TimeSeriesSplit and Backtesting
+# Cross-Validation with TimeSeriesSplit and Backtesting
 def backtest(data, model, predictors, start=2500, step=250):
     all_predictions = []
     tscv = TimeSeriesSplit(n_splits=5)
@@ -156,16 +156,50 @@ def backtest(data, model, predictors, start=2500, step=250):
     return pd.concat(all_predictions)
 
 predictions = backtest(sp500, model, new_predictors)
+# Feature scaling
+from sklearn.preprocessing import StandardScaler
 
-precision = precision_score(predictions["Target"], predictions["Predictions"])
-recall = recall_score(predictions["Target"], predictions["Predictions"])
-f1 = f1_score(predictions["Target"], predictions["Predictions"])
-accuracy = accuracy_score(predictions["Target"], predictions["Predictions"])
+scaler = StandardScaler()
+
+# Train-test split
+train_scaled = scaler.fit_transform(train[predictors])
+test_scaled = scaler.transform(test[predictors])
+
+# Update Logistic Regression model
+from sklearn.linear_model import LogisticRegression
+
+model = LogisticRegression(max_iter=1000, solver='lbfgs')  # Adjusted for convergence
+model.fit(train_scaled, train["Target"])
+
+# Predict and evaluate
+preds = model.predict(test_scaled)
+precision = precision_score(test["Target"], preds)
+recall = recall_score(test["Target"], preds)
+f1 = f1_score(test["Target"], preds)
+accuracy = accuracy_score(test["Target"], preds)
 
 # Print Metrics
 print(f"Precision: {precision}")
 print(f"Recall: {recall}")
 print(f"F1-Score: {f1}")
 print(f"Accuracy: {accuracy}")
+
+# Predict whether the market will go up or down tomorrow
+def predict_tomorrow(data, predictors, model):
+    # Use the most recent row of data to predict tomorrow
+    latest_data = data.iloc[-1:]  # Get the last row
+    preds_proba = model.predict_proba(latest_data[predictors])[:, 1]  # Get probability for "up"
+    
+    # Set threshold at 0.5 (or adjust based on what you optimized earlier)
+    prediction = 1 if preds_proba >= 0.5 else 0
+    
+    # Print the result
+    if prediction == 1:
+        print("The market is more likely to go UP tomorrow.")
+    else:
+        print("The market is more likely to go DOWN tomorrow.")
+
+# Call the function with the trained model and latest data
+predict_tomorrow(sp500, new_predictors, model)
 
 #plt.show()
